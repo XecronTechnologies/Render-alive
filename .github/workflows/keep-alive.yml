@@ -1,0 +1,73 @@
+name: Keep Render Service Alive
+
+on:
+  schedule:
+    - cron: '*/14 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping-and-log:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Test API and Store Logs
+      run: |
+        echo "🚀 Starting API check..."
+        
+        # Get current timestamp
+        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        
+        # Ping main API
+        echo "📡 Pinging: https://api.xecrontechnologies.in/api"
+        START_TIME=$(date +%s)
+        RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://api.xecrontechnologies.in/api")
+        END_TIME=$(date +%s)
+        RESPONSE_TIME=$((END_TIME - START_TIME))
+        
+        echo "📊 Response Code: $RESPONSE_CODE"
+        echo "⏱️ Response Time: ${RESPONSE_TIME}s"
+        
+        # Determine status
+        if [ "$RESPONSE_CODE" -eq 200 ]; then
+          STATUS="success"
+          MESSAGE="API is healthy"
+        else
+          STATUS="failed" 
+          MESSAGE="API returned HTTP $RESPONSE_CODE"
+        fi
+        
+        # Create log payload
+        LOG_PAYLOAD='{
+          "path": ["render_cron_log"],
+          "ser_acc_id": "766658435727",
+          "data": {
+            "timestamp": "'$TIMESTAMP'",
+            "status": "'$STATUS'",
+            "response_code": '$RESPONSE_CODE',
+            "response_time_seconds": '$RESPONSE_TIME',
+            "message": "'$MESSAGE'",
+            "source": "github_actions"
+          }
+        }'
+        
+        echo "📝 Log payload: $LOG_PAYLOAD"
+        
+        # Send to Firebase
+        echo "💾 Storing log in Firebase..."
+        FIREBASE_RESPONSE=$(curl -s -X POST \
+          -H "Content-Type: application/json" \
+          -d "$LOG_PAYLOAD" \
+          -w "HTTP_STATUS:%{http_code}" \
+          "https://api.xecrontechnologies.in/api/firebase/create")
+        
+        # Check Firebase response
+        HTTP_STATUS=$(echo "$FIREBASE_RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d':' -f2)
+        
+        if [ "$HTTP_STATUS" -eq 200 ]; then
+          echo "✅ SUCCESS: Log stored in Firebase"
+        else
+          echo "❌ FAILED: Firebase returned HTTP $HTTP_STATUS"
+          echo "Response: $FIREBASE_RESPONSE"
+        fi
+        
+        echo "🎉 Cron job completed at $(date)"
